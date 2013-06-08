@@ -10,9 +10,7 @@ import listparser
 import feedparser
 import urlnorm
 
-from pylyskom import komauxitems
-from pylyskom import kom
-from httpkom import komsession
+from pylyskom import kom, komauxitems, komsession
 
 
 # TODO:
