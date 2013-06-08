@@ -24,7 +24,6 @@ from pylyskom import kom, komauxitems, komsession
 # - hantera maxlängd på mötesnamn (hur ska vi matcha url om inte hela får plats?) Kan vi öka max?
 # - hantera att feeds inte finns (404 kan vara temporärt)
 
-# - flytta komsession till pylyskom
 
 
 lyskom_host = 'localhost'
@@ -187,8 +186,14 @@ def create_message_id(entry):
     # identical to another.
     #print entry
     m.update(get_id_for_entry(entry).encode('utf-8'))
-    m.update(entry.title.encode('utf-8'))
-    m.update(get_content_for_entry(entry)['value'].encode('utf-8'))
+    
+    #m.update(entry.title.encode('utf-8'))
+    
+    # We can't have the content as unique, because some blogs add
+    # things like html comments about page render time, which will
+    # vary for each time.
+    # m.update(get_content_for_entry(entry)['value'].encode('utf-8'))
+    
     digest = m.hexdigest()
     message_id = "<" + digest + "@komfeeder>"
     return message_id
@@ -261,11 +266,8 @@ def create_text_for_entry(ksession, conf, feed, entry, message_id):
         author = feed.title
     komtext.aux_items.append(kom.AuxItem(komauxitems.AI_MX_AUTHOR, data=author))
     
-    try:
-        text_no = ksession.create_text(komtext)
-        print "LysKOM: Created text no: %d" % text_no
-    except:
-        raise
+    text_no = ksession.create_text(komtext)
+    print "LysKOM: Created text no: %d" % text_no
 
 
 def import_feed(ksession, url):
@@ -315,6 +317,7 @@ def main(argv):
         #"http://feeds2.feedburner.com/hunch",
         #"http://intertwingly.net/blog/index.atom",
         #"http://feeds.feedburner.com/herdingcode",
+        #"http://www.monotoni.se/bass/feed/",
 
 
         # TODO: De här finns inte, men d.status = 301 istället för 404.
@@ -327,7 +330,6 @@ def main(argv):
 
         # TODO: Tecken som inte kan kodas till latin1 (dvs något som används i aux-items)
         #"http://feeds.feedburner.com/bin/recykl",
-
         ]
     
     if len(argv) > 1:
