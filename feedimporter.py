@@ -29,13 +29,11 @@ from httpkom import komsession
 # - flytta komsession till pylyskom
 
 
-#lyskom_host = 'localhost'
-lyskom_host = 'strela.intresseklubben.org'
+lyskom_host = 'localhost'
 lyskom_port = 4894
 
 komfeeder_name = 'komfeeder'
-#komfeeder_password = 'test123'
-komfeeder_password = 'facit24facit24'
+komfeeder_password = 'test123'
 
 
 # Max conference name length
