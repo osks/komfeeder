@@ -24,6 +24,8 @@ from pylyskom import kom, komauxitems, komsession
 # - hantera maxlängd på mötesnamn (hur ska vi matcha url om inte hela får plats?) Kan vi öka max?
 # - hantera att feeds inte finns (404 kan vara temporärt)
 
+# - jskom: hoppa direkt till nästa olästa möte, utan att gå via listan av olästa möten
+# - jskom: kunna söka på bloggnamn och bloggurl (via re-lookup)
 
 
 lyskom_host = 'localhost'
@@ -123,7 +125,7 @@ def find_conf_for_feed(ksession, feed):
         conf_no = ksession.lookup_name_exact(conf_name, want_pers=False, want_confs=True)
     except komsession.NameNotFound:
         print "LysKOM: Did not find conference '%s'." % (conf_name,)
-        conf_no = create_conf(ksession, conf_name)
+        conf_no = create_conf(ksession, feed, conf_name)
 
     conf = ksession.get_conference(conf_no, micro=False)
     print "LysKOM: Found conference: '%s'." % conf.name
@@ -132,22 +134,15 @@ def find_conf_for_feed(ksession, feed):
     return conf
 
 
-def create_conf(ksession, conf_name):
-    try:
-        conf_no = ksession.create_conf(conf_name)
-        print "LysKOM: Created conference : (%d) '%s'." % (conf_no, conf_name)
-        return conf_no
-    except kom.ConferenceExists:
-        raise Exception("Failed to create conference: '%s'." % conf_name)
-
-
-def get_message_id_from_text(text):
+def get_unique_id_from_text(text):
     if text.aux_items is None:
         return None
     
     for ai in text.aux_items:
-        if ai.tag == komauxitems.AI_MX_MESSAGE_ID:
+        if ai.tag == komauxitems.AI_KOMFEEDER_UNIQUE_ID:
             return ai.data
+        #if ai.tag == komauxitems.AI_MX_MESSAGE_ID:
+        #    return ai.data
 
     return None
 
@@ -180,7 +175,7 @@ def get_published_for_entry(entry):
         return None
 
 
-def create_message_id(entry):
+def create_unique_id(entry):
     m = hashlib.sha256()
     # Stuff that all should be the same for one entry to be consider
     # identical to another.
@@ -195,22 +190,22 @@ def create_message_id(entry):
     # m.update(get_content_for_entry(entry)['value'].encode('utf-8'))
     
     digest = m.hexdigest()
-    message_id = "<" + digest + "@komfeeder>"
-    return message_id
+    unique_id = "<" + digest + "@komfeeder>"
+    return unique_id
 
 
 def import_feed_to_conf(ksession, data, conf):
     entries = sorted(data.entries, key=lambda e: get_published_for_entry(e))
     last_texts = get_last_texts(ksession, conf, max(100, len(entries)))
-    last_text_message_ids = [ get_message_id_from_text(t) for t in last_texts ]
-    existing_message_ids = set([ m_id for m_id in last_text_message_ids if m_id is not None ])
+    last_text_unique_ids = [ get_unique_id_from_text(t) for t in last_texts ]
+    existing_unique_ids = set([ e_id for e_id in last_text_unique_ids if e_id is not None ])
     
     # Create texts, starting with the oldest.
     num_skipped = 0
     for e in entries:
-        message_id = create_message_id(e)
-        if message_id not in existing_message_ids:
-            create_text_for_entry(ksession, conf, data.feed, e, message_id)
+        unique_id = create_unique_id(e)
+        if unique_id not in existing_unique_ids:
+            create_text_for_entry(ksession, conf, data.feed, e, unique_id)
         else:
             num_skipped += 1
             #print "Message ID for '%s' already exists. Skipping." % (e.link,)
@@ -228,7 +223,24 @@ _content_type_map = {
     'application/xhtml+xml': 'text/html',
     'text/plain': 'text/plain' }
 
-def create_text_for_entry(ksession, conf, feed, entry, message_id):
+
+def create_conf(ksession, feed, conf_name):
+    try:
+        aux_items = []
+        if 'link' in feed:
+            aux_items.append(kom.AuxItem(komauxitems.AI_KOMFEEDER_URL,
+                                         data=feed.link.encode('utf-8')))
+        if 'title' in feed:
+            aux_items.append(kom.AuxItem(komauxitems.AI_KOMFEEDER_TITLE,
+                                         data=feed.title.encode('utf-8')))
+        conf_no = ksession.create_conference(conf_name, aux_items)
+        print "LysKOM: Created conference : (%d) '%s'." % (conf_no, conf_name)
+        return conf_no
+    except kom.ConferenceExists:
+        raise Exception("Failed to create conference: '%s'." % conf_name)
+
+
+def create_text_for_entry(ksession, conf, feed, entry, unique_id):
     komtext = komsession.KomText()
     komtext.recipient_list = [ kom.MIRecipient(type=kom.MIR_TO, recpt=conf.conf_no) ]
     komtext.subject = entry.title
@@ -247,13 +259,14 @@ def create_text_for_entry(ksession, conf, feed, entry, message_id):
     #print komtext.subject, entry.published
     
     komtext.aux_items = []
-    komtext.aux_items.append(kom.AuxItem(komauxitems.AI_MX_MESSAGE_ID, data=message_id))
+    komtext.aux_items.append(kom.AuxItem(komauxitems.AI_KOMFEEDER_UNIQUE_ID, data=unique_id))
+    #komtext.aux_items.append(kom.AuxItem(komauxitems.AI_MX_MESSAGE_ID, data=unique_id))
     
     published_date = get_published_for_entry(entry)
     if published_date is not None:
-        komtext.aux_items.append(kom.AuxItem(
-                komauxitems.AI_MX_DATE,
-                data=time.strftime("%Y-%m-%d %H:%M:%S +0000", published_date)))
+        date_str = time.strftime("%Y-%m-%d %H:%M:%S +0000", published_date)
+        komtext.aux_items.append(kom.AuxItem(komauxitems.AI_KOMFEEDER_DATE, data=date_str))
+        #komtext.aux_items.append(kom.AuxItem(komauxitems.AI_MX_DATE, data=date_str))
     
     if 'author_detail' in entry:
         if 'name' in entry.author_detail and len(entry.author_detail.name) > 0:
@@ -264,7 +277,13 @@ def create_text_for_entry(ksession, conf, feed, entry, message_id):
             author = feed.title
     else:
         author = feed.title
-    komtext.aux_items.append(kom.AuxItem(komauxitems.AI_MX_AUTHOR, data=author))
+    komtext.aux_items.append(kom.AuxItem(komauxitems.AI_KOMFEEDER_AUTHOR,
+                                         data=author.encode('utf-8')))
+    #komtext.aux_items.append(kom.AuxItem(komauxitems.AI_MX_AUTHOR, data=author))
+
+    if 'link' in entry:
+        komtext.aux_items.append(kom.AuxItem(komauxitems.AI_KOMFEEDER_URL,
+                                             data=entry.link.encode('utf-8')))
     
     text_no = ksession.create_text(komtext)
     print "LysKOM: Created text no: %d" % text_no
@@ -299,8 +318,8 @@ def read_opml(filename):
 
 def main(argv):
     urls = [
-        #"http://www.ofiltrerat.se/feeds/posts/default",
         #"http://blog.osd.se/feed/",
+        #"http://www.ofiltrerat.se/feeds/posts/default",
         #"http://bacon.hornfeldt.se/feed/atom/",
         #"http://blog.svd.se/maratonbloggen/feed/",
         #"http://annhelenarudberg1.blogspot.com/feeds/posts/default",
@@ -327,9 +346,6 @@ def main(argv):
 
         # TODO: Har något som inte kan kodas till latin1.
         #"http://feeds.pagetracer.com/pagetracer'"
-
-        # TODO: Tecken som inte kan kodas till latin1 (dvs något som används i aux-items)
-        #"http://feeds.feedburner.com/bin/recykl",
         ]
     
     if len(argv) > 1:
